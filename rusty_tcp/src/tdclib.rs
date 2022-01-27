@@ -6,6 +6,7 @@ mod tdcvec {
     use crate::errorlib::Tp3ErrorKind;
     use crate::tdclib::TdcType;
     use crate::packetlib::{Packet, PacketEELS as Pack};
+    use std::convert::TryInto;
 
     pub struct TdcSearch {
         data: Vec<(usize, TdcType)>,
@@ -148,7 +149,7 @@ mod tdcvec {
             match *x {
                 [84, 80, 88, 51, nci, _, _, _] => {*last_ci = nci as usize},
                 _ => {
-                    let packet = Pack { chip_index: *last_ci, data: x};
+                    let packet = Pack { chip_index: *last_ci, data: x.try_into().unwrap()};
                     
                     if packet.id() == 6 {
                         tdc_struct.add_tdc(&packet);

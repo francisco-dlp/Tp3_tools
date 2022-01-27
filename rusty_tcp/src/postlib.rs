@@ -7,6 +7,7 @@ pub mod coincidence {
     use std::fs;
     use rayon::prelude::*;
     use std::time::Instant;
+    use std::convert::TryInto;
 
     const TIME_WIDTH: usize = 100; //Time width to correlate (ns).
     const TIME_DELAY: usize = 160; //Time delay to correlate (ns).
@@ -416,7 +417,7 @@ pub mod coincidence {
                 match *pack_oct {
                     [84, 80, 88, 51, nci, _, _, _] => {ci=nci as usize;},
                     _ => {
-                        let packet = Pack { chip_index: ci, data: pack_oct };
+                        let packet = Pack { chip_index: ci, data: pack_oct.try_into().unwrap() };
                         match packet.id() {
                             6 if packet.tdc_type() == np_tdc.id() => {
                                 temp_tdc.add_tdc(&packet);
