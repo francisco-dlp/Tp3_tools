@@ -109,9 +109,6 @@ impl SpimKind for Live {
                 }
             })
             .for_each(|index| {
-                //for val in index.iter() {
-                //    my_vec.push(*val);
-                //}
                 append_to_index_array(&mut my_vec, index);
             });
 
@@ -127,118 +124,6 @@ impl SpimKind for Live {
     }
 }
 
-/*
-/// Possible outputs to build spim data. `usize` does not implement cluster detection. `(f64,
-/// usize, usize, u8)` performs cluster detection. This could reduce the data flux but will
-/// cost processing time.
-pub struct Output<T>{
-    data: Vec<T>,
-}
-
-impl<T> Output<T> {
-    fn upt(&mut self, new_data: T) {
-        self.data.push(new_data);
-    }
-
-    fn check(&self) -> bool {
-        self.data.iter().next().is_some()
-    }
-}
-*/
-
-/*
-const CLUSTER_TIME: f64 = 50.0e-09;
-const UNIQUE_BYTE: usize = 1;
-const INDEX_BYTE: usize = 4;
-
-impl Output<(f64, usize, usize, u8)> {
-    fn build_output(mut self) -> Vec<u8> {
-        let mut index_array: Vec<usize> = Vec::new();
-        if let Some(val) = self.data.get(0) {
-            let mut last = val.clone();
-            self.data.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-            for tp in self.data {
-                if (tp.0>last.0+CLUSTER_TIME || (tp.1 as isize - last.1 as isize).abs() > 2) || tp.3==6 {
-                    index_array.push(tp.2);
-                }
-                last = tp;
-            }
-        }
-        event_counter(index_array)
-    }
-}
-
-impl Output<usize> {
-
-    fn build_output(self) -> Vec<u8> {
-        event_counter(self.data)
-    }
-}
-*/
-
-/*
-impl Output<(usize, usize)> {
-    fn build_output(self, set: &Settings, spim_tdc: &PeriodicTdcRef) -> Vec<u8> {
-        let mut my_vec: Vec<u8> = Vec::new();
-
-        self.data.iter()
-            .filter_map(|&(x, dt)| if dt % spim_tdc.period < spim_tdc.low_time {
-                let r = dt / spim_tdc.period;
-                let rin = dt % spim_tdc.period;
-                let index = ((r/set.spimoverscany) % set.yspim_size * set.xspim_size + (set.xspim_size * rin / spim_tdc.low_time)) * SPIM_PIXELS + x;
-                Some(index) 
-            } else {None}
-            )
-            .for_each(|index| {
-                append_to_index_array(&mut my_vec, index);
-            });
-
-    my_vec
-    }
-}
-*/
-
-/*
-fn event_counter(mut my_vec: Vec<usize>) -> Vec<u8> {
-    my_vec.sort_unstable();
-    let mut unique:Vec<u8> = Vec::new();
-    let mut index:Vec<u8> = Vec::new();
-    let mut counter:usize = 1;
-    if my_vec.len() > 0 {
-        let mut last = my_vec[0];
-        for val in my_vec {
-            if last == val {
-                //counter.wrapping_add(1);
-                counter+=1;
-            } else {
-                append_to_index_array(&mut unique, counter, UNIQUE_BYTE);
-                append_to_index_array(&mut index, last, INDEX_BYTE);
-                counter = 1;
-            }
-            last = val;
-        }
-        append_to_index_array(&mut unique, counter, UNIQUE_BYTE);
-        append_to_index_array(&mut index, last, INDEX_BYTE);
-    }
-    //let sum_unique = unique.iter().map(|&x| x as usize).sum::<usize>();
-    //let mmax_unique = unique.iter().map(|&x| x as usize).max().unwrap();
-    //let indexes_len = index.len();
-
-    //let mut header_unique:Vec<u8> = String::from("{StartUnique}").into_bytes();
-    let header_unique:Vec<u8> = vec![123, 83, 116, 97, 114, 116, 85, 110, 105, 113, 117, 101, 125];
-    //let mut header_indexes:Vec<u8> = String::from("{StartIndexes}").into_bytes();
-    let header_indexes:Vec<u8> = vec![123, 83, 116, 97, 114, 116, 73, 110, 100, 101, 120, 101, 115, 125];
-
-    let vec = header_unique.into_iter()
-        .chain(unique.into_iter())
-        .chain(header_indexes.into_iter())
-        .chain(index.into_iter())
-        .collect::<Vec<u8>>();
-    //println!("Total len with unique: {}. Total len only indexes (older): {}. Max unique is {}. Improvement is {}", vec.len(), sum_unique * 4, mmax_unique, sum_unique as f64 * 4.0 / vec.len() as f64);
-    vec
-}
-*/
-    
 ///Reads timepix3 socket and writes in the output socket a list of frequency followed by a list of unique indexes. First TDC must be a periodic reference, while the second can be nothing, periodic tdc or a non periodic tdc.
 pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Settings, mut spim_tdc: PeriodicTdcRef, mut ref_tdc: T, meas_type: W) -> Result<(), Tp3ErrorKind>
     where V: 'static + Send + TimepixRead,
