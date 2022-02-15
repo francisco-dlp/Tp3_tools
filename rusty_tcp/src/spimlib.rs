@@ -192,6 +192,45 @@ fn event_counter(mut my_vec: Vec<usize>) -> Vec<u8> {
 }
 */
     
+
+pub struct SpimVal<'a> {
+    data: &'a [u8],
+    ci: usize,
+}
+
+impl<'a> Iterator for SpimVal<'a> {
+    type Item = &'a (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.data.chunks_exact(8).next() {
+            _ => {},
+        };
+        Some(&(0, 0))
+    }
+}
+
+
+
+pub struct Inspector<'a> {
+    iter: std::slice::ChunksExact<'a, u8>,
+    ci: u8,
+}
+
+impl<'a> Iterator for Inspector<'a> {
+    type Item = &'a (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(x) = self.iter.next() {
+            match x {
+                [84, 80, 88, 51, nci, _, _, _] => {self.ci = *nci; None},
+                _ => {Some(&(10, 0))},
+            }
+        } else {
+            None
+        }
+    }
+}
+
 ///Reads timepix3 socket and writes in the output socket a list of frequency followed by a list of unique indexes. First TDC must be a periodic reference, while the second can be nothing, periodic tdc or a non periodic tdc.
 pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Settings, mut spim_tdc: PeriodicTdcRef, mut ref_tdc: T, meas_type: W) -> Result<(), Tp3ErrorKind>
     where V: 'static + Send + TimepixRead,
@@ -199,6 +238,8 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
           W: 'static + Send + SpimKind,
           U: 'static + Send + Write,
 {
+
+
     let (tx, rx) = mpsc::channel();
     let mut last_ci = 0usize;
     let mut buffer_pack_data = [0; BUFFER_SIZE];
@@ -206,6 +247,9 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
     
     thread::spawn(move || {
         while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
+            //let mut test = SpimVal{data: &buffer_pack_data[0..size], ci: 0};
+            //println!("{:?}", test.next());
+            //println!("{:?}", test.next());
             build_spim_data(&mut list, &buffer_pack_data[0..size], &mut last_ci, &my_settings, &mut spim_tdc, &mut ref_tdc);
             if tx.send(list).is_err() {println!("Cannot send data over the thread channel."); break;}
             list = meas_type.copy_empty();
