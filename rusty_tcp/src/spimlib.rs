@@ -7,7 +7,7 @@ use std::io::{Write};
 use std::sync::mpsc;
 use std::thread;
 use std::convert::TryInto;
-//use rayon::prelude::*;
+use rayon::prelude::*;
 
 const VIDEO_TIME: usize = 5000;
 const SPIM_PIXELS: usize = 1025;
@@ -285,7 +285,9 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
 
     while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
         let my_insp = Inspector {iter: buffer_pack_data[0..size].chunks_exact(8), ci: &mut last_ci, line_tdc: &mut spim_tdc };
-        let my_vec = my_insp.filter_map(&|(x, dt)| {
+        
+        let my_vec = my_insp
+            .filter_map(&|(x, dt)| {
                 
             let val = dt % period;
             if val < low_time {
@@ -305,6 +307,7 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
                 }
         }).
         collect::<Vec<usize>>();
+        
 
         //if ns_sock.write(as_bytes(&my_vec)).is_err() {println!("Client disconnected on data."); break;}
 
