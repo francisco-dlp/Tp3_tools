@@ -213,21 +213,51 @@ impl<'a> Iterator for SpimVal<'a> {
 
 pub struct Inspector<'a> {
     iter: std::slice::ChunksExact<'a, u8>,
-    ci: u8,
+    ci: &'a mut usize,
+    line_tdc: &'a mut PeriodicTdcRef,
+
 }
 
 impl<'a> Iterator for Inspector<'a> {
-    type Item = &'a (usize, usize);
+    type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(x) = self.iter.next() {
-            match x {
-                [84, 80, 88, 51, nci, _, _, _] => {self.ci = *nci; None},
-                _ => {Some(&(10, 0))},
+        loop {
+            if let Some(x) = self.iter.next() {
+                loop {
+                    match x {
+                        [84, 80, 88, 51, nci, _, _, _] => {
+                            *self.ci = *nci as usize;
+                            break;
+                        },
+                        _ => {
+                            let packet = PacketEELS { chip_index: *self.ci, data: x.try_into().unwrap()};
+                            let id = packet.id();
+                            match id {
+                                11 => {
+                                    return Some((packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME));
+                                },
+                                6 if packet.tdc_type() == self.line_tdc.id() => {
+                                    self.line_tdc.upt(packet.tdc_time_norm(), packet.tdc_counter());
+                                    break;
+                                },
+                                _ => {break;},
+                            }
+                        },
+                    }
+                }
+            } else {
+                return None;
             }
-        } else {
-            None
         }
+    }
+}
+
+fn as_bytes(v: &[usize]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(
+            v.as_ptr() as *const u8,
+            v.len() * std::mem::size_of::<usize>())
     }
 }
 
@@ -240,11 +270,49 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
 {
 
 
-    let (tx, rx) = mpsc::channel();
+    //let (tx, rx) = mpsc::channel();
     let mut last_ci = 0usize;
     let mut buffer_pack_data = [0; BUFFER_SIZE];
     let mut list = meas_type.copy_empty();
+    let start = Instant::now();
+
+    let period = spim_tdc.period;
+    let low_time = spim_tdc.low_time;
+    let xspim = my_settings.xspim_size;
+    let yspim = my_settings.yspim_size;
+    let mut frame = spim_tdc.begin_frame;
     
+
+    while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
+        let my_insp = Inspector {iter: buffer_pack_data[0..size].chunks_exact(8), ci: &mut last_ci, line_tdc: &mut spim_tdc };
+        let my_vec = my_insp.filter_map(&|(x, dt)| {
+                
+            let val = dt % period;
+            if val < low_time {
+                let mut r = dt / period; //how many periods -> which line to put.
+                let rin = xspim * val / low_time; //Column correction. Maybe not even needed.
+                    
+                if r > (yspim-1) {
+                    if r > 4096 {return None;} //This removes overflow electrons. See add_electron_hit
+                    r %= yspim;
+                }
+                    
+                let index = (r * xspim + rin) * SPIM_PIXELS + x;
+
+                    Some(index)
+                } else {
+                    None
+                }
+        }).
+        collect::<Vec<usize>>();
+
+        //if ns_sock.write(as_bytes(&my_vec)).is_err() {println!("Client disconnected on data."); break;}
+
+
+    }
+
+    
+    /*
     thread::spawn(move || {
         while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
             //let mut test = SpimVal{data: &buffer_pack_data[0..size], ci: 0};
@@ -256,12 +324,12 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
         }
     });
  
-    let start = Instant::now();
     for tl in rx {
         let result = tl.build_output(&my_settings, &spim_tdc);
         if ns_sock.write(&result).is_err() {println!("Client disconnected on data."); break;}
     }
 
+    */
     let elapsed = start.elapsed(); 
     println!("Total elapsed time is: {:?}.", elapsed);
 
