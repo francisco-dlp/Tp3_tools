@@ -219,8 +219,9 @@ pub struct Inspector<'a> {
 }
 
 impl<'a> Iterator for Inspector<'a> {
-    type Item = (usize, usize);
+    type Item = usize;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(x) = self.iter.next() {
@@ -235,7 +236,14 @@ impl<'a> Iterator for Inspector<'a> {
                             let id = packet.id();
                             match id {
                                 11 => {
-                                    return Some((packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME));
+                                    let x = get_spimindex(packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME, self.line_tdc, 512, 512);
+                                    if x.is_some() {
+                                        return x;
+                                    }
+                                    else {
+                                        break;
+                                    }
+                                    //return Some((packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME));
                                 },
                                 6 if packet.tdc_type() == self.line_tdc.id() => {
                                     self.line_tdc.upt(packet.tdc_time_norm(), packet.tdc_counter());
@@ -249,7 +257,7 @@ impl<'a> Iterator for Inspector<'a> {
             } else {
                 return None;
             }
-        }
+        };
     }
 }
 
@@ -283,36 +291,57 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
     let mut frame = spim_tdc.begin_frame;
     
 
-    while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
-        let my_insp = Inspector {iter: buffer_pack_data[0..size].chunks_exact(8), ci: &mut last_ci, line_tdc: &mut spim_tdc };
-        
-        let my_vec = my_insp
-            .filter_map(&|(x, dt)| {
-                
-            let val = dt % period;
-            if val < low_time {
-                let mut r = dt / period; //how many periods -> which line to put.
-                let rin = xspim * val / low_time; //Column correction. Maybe not even needed.
-                    
-                if r > (yspim-1) {
-                    if r > 4096 {return None;} //This removes overflow electrons. See add_electron_hit
-                    r %= yspim;
-                }
-                    
-                let index = (r * xspim + rin) * SPIM_PIXELS + x;
+    //thread::spawn(move || {
+        while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
+            let my_insp = Inspector {iter: buffer_pack_data[0..size].chunks_exact(8), ci: &mut last_ci, line_tdc: &mut spim_tdc };
+            
+            //my_insp.collect::<Vec<_>>();
+            //
+            
 
-                    Some(index)
-                } else {
-                    None
-                }
-        }).
-        collect::<Vec<usize>>();
+            let my_vec = my_insp.for_each(|x| {});
+            //let my_vec = my_insp.collect::<Vec<usize>>();
+
+                /*
+                .filter_map(&|(x, dt)| {
+                    
+                let val = dt % period;
+                if val < low_time {
+                    let mut r = dt / period; //how many periods -> which line to put.
+                    let rin = xspim * val / low_time; //Column correction. Maybe not even needed.
+                        
+                    if r > (yspim-1) {
+                        if r > 4096 {return None;} //This removes overflow electrons. See add_electron_hit
+                        r %= yspim;
+                    }
+                        
+                    let index = (r * xspim + rin) * SPIM_PIXELS + x;
+
+                        Some(index)
+                    } else {
+                        None
+                    }
+                }).count();
+                */
+            //if tx.send(my_vec).is_err() {println!("Cannot send data over the thread channel."); break;}
+        }
+    //});
+    
+    //for tl in rx {
+        //let result = tl.build_output(&my_settings, &spim_tdc);
+        //if ns_sock.write(&result).is_err() {println!("Client disconnected on data."); break;}
+    //}
+
+
+        //for_each(|x| {
+         //       pus.push(x);
+         //   });
+
         
 
         //if ns_sock.write(as_bytes(&my_vec)).is_err() {println!("Client disconnected on data."); break;}
 
 
-    }
 
     
     /*
