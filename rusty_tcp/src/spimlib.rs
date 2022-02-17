@@ -21,7 +21,7 @@ pub trait SpimKind {
     fn add_tdc_hit<T: TdcControl>(&mut self, packet: &PacketEELS, line_tdc: &PeriodicTdcRef, ref_tdc: &mut T);
     fn upt_line(&self, packet: &PacketEELS, settings: &Settings, line_tdc: &mut PeriodicTdcRef);
     fn check(&self) -> bool;
-    fn build_output(&self, set: &Settings, spim_tdc: &PeriodicTdcRef) -> Vec<u8>;
+    fn build_output(&self, set: &Settings, spim_tdc: &PeriodicTdcRef) -> Vec<usize>;
     fn copy_empty(&self) -> Self;
     fn new() -> Self;
 }
@@ -29,22 +29,27 @@ pub trait SpimKind {
 
 #[inline]
 pub fn get_spimindex(x: usize, dt: usize, spim_tdc: &PeriodicTdcRef, xspim: usize, yspim: usize) -> Option<usize> {
-    let val = dt % spim_tdc.period;
+    
+    let mut r = dt / spim_tdc.period;
+    let val = dt - r * spim_tdc.period;
+
+    //let val = dt % spim_tdc.period;
     if val < spim_tdc.low_time {
-        let mut r = dt / spim_tdc.period; //how many periods -> which line to put.
+        //let mut r = dt / spim_tdc.period; //how many periods -> which line to put.
         let rin = xspim * val / spim_tdc.low_time; //Column correction. Maybe not even needed.
             
-            if r > (yspim-1) {
-                if r > 4096 {return None;} //This removes overflow electrons. See add_electron_hit
-                r %= yspim;
-            }
             
-            let index = (r * xspim + rin) * SPIM_PIXELS + x;
-        
-            Some(index)
-        } else {
-            None
+        if r > (yspim-1) {
+            if r > 4096 {return None;} //This removes overflow electrons. See add_electron_hit
+            r %= yspim;
         }
+            
+        let index = (r * xspim + rin) * SPIM_PIXELS + x;
+        
+        Some(index)
+    } else {
+        None
+    }
 }
 
 pub struct Live {
@@ -80,8 +85,8 @@ impl SpimKind for Live {
         self.data.get(0).is_some()
     }
 
-    #[inline]
-    fn build_output(&self, set: &Settings, spim_tdc: &PeriodicTdcRef) -> Vec<u8> {
+    #[inline(always)]
+    fn build_output(&self, set: &Settings, spim_tdc: &PeriodicTdcRef) -> Vec<usize> {
 
         //First step is to find the index of the (X, Y) of the spectral image in a flattened way
         //(last index is X*Y). The line value is thus multiplied by the spim size in the X
@@ -101,7 +106,7 @@ impl SpimKind for Live {
         
         
 
-        let mut my_vec: Vec<u8> = Vec::with_capacity(BUFFER_SIZE / 2);
+        //let mut my_vec: Vec<usize> = Vec::with_capacity(BUFFER_SIZE / 2);
         self.data.iter()
             .filter_map(|&(x, dt)| {
                 get_spimindex(x, dt, spim_tdc, set.xspim_size, set.yspim_size)
@@ -131,15 +136,15 @@ impl SpimKind for Live {
                     None
                 }
                 */
-            })
-            .for_each(|index| {
-                //for val in index.iter() {
-                //    my_vec.push(*val);
+            }).collect::<Vec<usize>>()
+            //.for_each(|index| {
+            //    //for val in index.iter() {
+             //   //    my_vec.push(*val);
                 //}
-                append_to_index_array(&mut my_vec, index);
-            });
+            //    append_to_index_array(&mut my_vec, index);
+            //});
 
-    my_vec
+    //my_vec
     }
 
     fn copy_empty(&self) -> Self {
@@ -223,41 +228,38 @@ impl<'a> Iterator for Inspector<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(x) = self.iter.next() {
-                loop {
-                    match x {
-                        [84, 80, 88, 51, nci, _, _, _] => {
-                            *self.ci = *nci as usize;
-                            break;
-                        },
-                        _ => {
-                            let packet = PacketEELS { chip_index: *self.ci, data: x.try_into().unwrap()};
-                            let id = packet.id();
-                            match id {
-                                11 => {
-                                    let x = get_spimindex(packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME, self.line_tdc, 512, 512);
-                                    if x.is_some() {
-                                        return x;
-                                    }
-                                    else {
-                                        break;
-                                    }
-                                    //return Some((packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME));
-                                },
-                                6 if packet.tdc_type() == self.line_tdc.id() => {
-                                    self.line_tdc.upt(packet.tdc_time_norm(), packet.tdc_counter());
+        while let Some(x) = self.iter.next() {
+            loop {
+                match x {
+                    [84, 80, 88, 51, nci, _, _, _] => {
+                        *self.ci = *nci as usize;
+                        break;
+                    },
+                    _ => {
+                        let packet = PacketEELS { chip_index: *self.ci, data: x.try_into().unwrap()};
+                        let id = packet.id();
+                        match id {
+                            11 => {
+                                let x = get_spimindex(packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME, self.line_tdc, 512, 512);
+                                if x.is_some() {
+                                    return x;
+                                }
+                                else {
                                     break;
-                                },
-                                _ => {break;},
-                            }
-                        },
-                    }
+                                }
+                                //return Some((packet.x(), packet.electron_time() - self.line_tdc.begin_frame - VIDEO_TIME));
+                            },
+                            6 if packet.tdc_type() == self.line_tdc.id() => {
+                                self.line_tdc.upt(packet.tdc_time_norm(), packet.tdc_counter());
+                                break;
+                            },
+                            _ => {break;},
+                        }
+                    },
                 }
-            } else {
-                return None;
             }
-        };
+        } 
+        return None;
     }
 }
 
@@ -289,18 +291,26 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
     let xspim = my_settings.xspim_size;
     let yspim = my_settings.yspim_size;
     let mut frame = spim_tdc.begin_frame;
+
     
+
 
     //thread::spawn(move || {
         while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
             let my_insp = Inspector {iter: buffer_pack_data[0..size].chunks_exact(8), ci: &mut last_ci, line_tdc: &mut spim_tdc };
             
-            //my_insp.collect::<Vec<_>>();
-            //
+            let my_vec = my_insp.count();
+            //println!("{}", my_vec);
+            //let my_vec = my_insp.collect::<Vec<(usize)>>();
             
 
-            let my_vec = my_insp.for_each(|x| {});
-            //let my_vec = my_insp.collect::<Vec<usize>>();
+            //build_spim_data(&mut list, &buffer_pack_data[0..size], &mut last_ci, &my_settings, &mut spim_tdc, &mut ref_tdc);
+            //let result = list.build_output(&my_settings, &spim_tdc);
+            //list = meas_type.copy_empty();
+
+            //println!("{:?} and {}", my_vec.len(), size);
+
+
 
                 /*
                 .filter_map(&|(x, dt)| {
@@ -325,21 +335,6 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
                 */
             //if tx.send(my_vec).is_err() {println!("Cannot send data over the thread channel."); break;}
         }
-    //});
-    
-    //for tl in rx {
-        //let result = tl.build_output(&my_settings, &spim_tdc);
-        //if ns_sock.write(&result).is_err() {println!("Client disconnected on data."); break;}
-    //}
-
-
-        //for_each(|x| {
-         //       pus.push(x);
-         //   });
-
-        
-
-        //if ns_sock.write(as_bytes(&my_vec)).is_err() {println!("Client disconnected on data."); break;}
 
 
 
@@ -347,9 +342,6 @@ pub fn build_spim<V, T, W, U>(mut pack_sock: V, mut ns_sock: U, my_settings: Set
     /*
     thread::spawn(move || {
         while let Ok(size) = pack_sock.read_timepix(&mut buffer_pack_data) {
-            //let mut test = SpimVal{data: &buffer_pack_data[0..size], ci: 0};
-            //println!("{:?}", test.next());
-            //println!("{:?}", test.next());
             build_spim_data(&mut list, &buffer_pack_data[0..size], &mut last_ci, &my_settings, &mut spim_tdc, &mut ref_tdc);
             if tx.send(list).is_err() {println!("Cannot send data over the thread channel."); break;}
             list = meas_type.copy_empty();
